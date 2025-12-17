@@ -57,9 +57,8 @@ const bloglistFirstCardStyle = `lg:col-span-3 md:col-span-2 col-span-1 h-auto ro
 const bloglistFirstCardImgStyle = `w-full object-cover object-center rounded-2xl overflow-hidden md:h-auto h-[200px] md:w-[49%] lg:w-[52%] shrink-0 mr-8`;
 const bloglistFirstCardDescriptionStyle = `text-graylv4 text-base font-normal leading-snug md:max-h-40 md:line-clamp-[7] line-clamp-3 mb-3`;
 
-const bloglistCardStyle = `lg:max-w-sm overflow-hidden bg-white transition duration-200 ease-in-out transform hover:-translate-y-1 hover:scale-105 cursor-poitner col-span-1 w-auto cursor-pointer`;
-const bloglistCardImgStyle = `w-full h-[200px] object-cover object-center rounded-2xl overflow-hidden`;
-
+const bloglistCardStyle = `group flex flex-col h-full overflow-hidden bg-white rounded-2xl shadow-sm border border-gray-100 transition-all duration-300 hover:-translate-y-1 hover:shadow-xl cursor-pointer`;
+const bloglistCardImgStyle = `w-full h-[220px] object-cover object-center transition-transform duration-500 ease-out group-hover:scale-105`;
 const bloglistCardBodyStyle = `py-4`;
 const bloglistCardTitleStyle = `font-bold text-2xl mb-3`;
 const bloglistCardCategoryStyle = `inline-block bg-activation text-primary md:text-sm font-medium mb-3 px-3 py-1.5 rounded-lg transition duration-200 ease-in-out hover:bg-blue-400 hover:text-white`;
