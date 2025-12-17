@@ -3,59 +3,44 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    
-    <meta name="description" content="개발 기술과 경험을 공유하는 블로그입니다." />
-    <meta name="keywords" content="개발, 프로그래밍, Docker, GitHub Pages, Tech Blog" />
-    <meta property="og:title" content="My Develop Blog" />
-    <meta property="og:description" content="개발 기술과 경험을 공유하는 블로그입니다." />
-    <meta property="og:image" content="img/icon/favicon.svg" />
-
     <link rel="shortcut icon" href="img/icon/favicon.svg" type="image/x-icon" />
-    <title>Develop Blog</title>
+    <title>Weniv Blog</title>
 
-    <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.8/dist/web/static/pretendard.css" />
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
-
+    <!-- marked -->
     <script src="./library/marked.min.js"></script>
 
+    <!-- hightlight.js -->
     <link rel="stylesheet" href="./library/highlight_default.min.css" />
     <script src="./library/highlight_highlight.min.js"></script>
     <link rel="stylesheet" href="./library/highlight_ally-light.min.css" />
 
-    <link rel="stylesheet" href="style/style.css" />
+    <!-- custom css -->
+    <link rel="stylesheet" href=" style/style.css" />
 
+    <!-- tailwind -->
     <script src="./library/tailwind-3.4.1.js"></script>
     <script>
       tailwind.config = {
         theme: {
           extend: {
-            fontFamily: {
-              sans: ['Pretendard', '-apple-system', 'BlinkMacSystemFont', 'system-ui', 'Roboto', 'Helvetica Neue', 'Segoe UI', 'Apple SD Gothic Neo', 'Noto Sans KR', 'Malgun Gothic', 'sans-serif'],
-              mono: ['JetBrains Mono', 'monospace'],
-            },
             colors: {
-              // Docker Style Color Palette applied
-              primary: "#1D63ED",   // Docker Official Blue (기존보다 선명함)
-              background: "#F4F6F8", // 아주 연한 회색 (눈이 편안함)
-              surface: "#172B4D",    // Deep Navy (텍스트 기본색)
-              
-              // Grayscale refined for Docker theme
-              graylv1: "#ffffff",    // 카드 배경 등 (흰색)
-              graylv2: "#DFE1E6",    // 테두리 (차분한 회색)
-              graylv3: "#8993A4",    // 플레이스홀더
-              graylv4: "#505F79",    // 서브 텍스트
-              
-              error: "#FF3440",
-              lowError: "#FFC533",
-              activation: "#E5F0FF", // primary의 연한 버전
+              primary: "#2e6ff2",
+              background: "#fff",
+              surface: "#121314",
+              graylv1: "#f3f5fa",
+              graylv2: "#d9dbe0",
+              graylv3: "#8d9299",
+              graylv4: "#47494d",
+              error: "#ff3440",
+              lowError: "#ffc533",
+              activation: "#dee8ff",
             },
-            boxShadow: {
-              'soft': '0 4px 20px -2px rgba(29, 99, 237, 0.1)', // 부드러운 파란 그림자
-            }
           },
         },
       };
     </script>
+    <!-- // tailwind -->
+
     <style>
       @keyframes slideDown {
         from {
@@ -71,132 +56,120 @@
       .markdown-cell > ul > li > p {
         display: inline-block;
       }
-      /* 스크롤바 커스텀 */
-      ::-webkit-scrollbar {
-        width: 8px;
-      }
-      ::-webkit-scrollbar-thumb {
-        background-color: #8993A4;
-        border-radius: 4px;
-      }
-      ::-webkit-scrollbar-track {
-        background-color: #F4F6F8;
-      }
     </style>
   </head>
-  <body class="font-sans w-full text-surface bg-background antialiased selection:bg-primary selection:text-white">
-    
-    <header class="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-graylv2 transition-colors duration-300">
-      <nav class="container max-w-[1190px] mx-auto md:p-[19px] p-4 flex items-center relative">
+  <body class="font-sans w-full text-surface">
+    <header class="relative bg-white mx-auto border-b border-gray-300">
+      <nav
+        class="container max-w-[1190px] mx-auto md:p-[19px] p-4 flex items-center relative"
+      >
+        <!-- 블로그 제목 영역 -->
         <h1
           id="blog-title"
-          class="md:text-2xl text-xl tracking-tight font-bold text-primary cursor-pointer hover:opacity-80 transition-opacity"
+          class="md:text-2xl text-lg leading-6 mr-auto font-semibold text-gray-900 cursor-pointer"
         >
-          Develop Blog
+          WENIVLOG
         </h1>
-        <div class="md:hidden w-6 h-6 ml-auto cursor-pointer text-surface hover:text-primary">
+        <!-- // 블로그 제목 영역 -->
+
+        <!-- 메뉴 영역 -->
+        <div class="md:hidden w-6 h-6">
           <button id="menu-button">
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
-            </svg>
             <span class="sr-only">메뉴 열기</span>
           </button>
         </div>
 
-        <div id="menu" class="hidden md:flex items-center ml-auto font-medium text-graylv4 gap-6">
-          </div>
+        <div id="menu" class="hidden md:flex items-center">
+          <!-- 메뉴 아이템들 -->
+        </div>
 
-        <button id="search-button" class="ml-4 md:hidden flex text-surface">
-             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
-            </svg>
+        <button id="search-button" class="ml-10 md:hidden flex">
           <span class="sr-only">검색창 열기</span>
         </button>
 
         <div
-          class="search-cont hidden md:block md:relative absolute z-10 rounded-xl border border-graylv2 bg-white shadow-soft box-border
-                 bottom-[-12px] right-2 xl:right-0 translate-y-full w-96 max-w-[90vw] p-4 
-                 md:p-0 md:top-0 md:right-0 md:border-0 md:translate-y-0 md:w-80 md:ml-8 md:shadow-none md:bg-transparent"
+          class="search-cont w-80 hidden md:block md:relative absolute z-10 rounded-2xl p-4 border border-graylv2 bottom-[-12px] right-2 xl:right-0 translate-y-full bg-background w-96 max-w-full box-border md:p-0 md:top-0 md:right-0 md:border-0 md:translate-y-0 md:w-80 md:ml-10"
         >
-          <label for="search-input" class="relative block group">
-            <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-graylv3 group-focus-within:text-primary">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
-                </svg>
-            </span>
+          <label for="search-input">
             <input
               type="text"
               id="search-input"
-              class="search-input bg-graylv1 rounded-lg pl-10 pr-12 py-2.5 text-sm font-medium text-surface placeholder:text-graylv3 
-                     focus:outline-none focus:ring-2 focus:ring-primary/50 focus:bg-white transition-all w-full border border-transparent focus:border-primary"
-              placeholder="Search..."
-            />
-             <div class="btn-cont flex gap-2 justify-center items-center absolute top-1/2 right-3 -translate-y-1/2">
-                <button class="reset-inp-btn hidden text-graylv3 hover:text-error">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4">
-                        <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
-                    </svg>
-                  <span class="sr-only">검색어 초기화</span>
-                </button>
-                <button class="search-inp-btn hidden">
-                  <span class="sr-only">검색하기</span>
-                </button>
-              </div>
-          </label>
+              class="search-input bg-graylv1 rounded-[10px] px-5 py-2.5 placeholder:font-normal placehoder:text-graylv3 focus:outline-0 shadow-sm w-full"
+              placeholder="Keyword"
+          /></label>
+          <div
+            class="btn-cont flex gap-2 justify-cetner items-center absolute top-1/2 md:right-4 right-8 -translate-y-1/2"
+          >
+            <button class="reset-inp-btn hidden">
+              <span class="sr-only">검색어 초기화</span>
+            </button>
+            <button class="search-inp-btn">
+              <span class="sr-only">검색하기</span>
+            </button>
+          </div>
         </div>
-        </nav>
+        <!-- // 메뉴 영역 -->
+      </nav>
+      <!-- 모바일에서 메뉴 영역이 보이도록 하는 영역 -->
       <div
         id="mobileMenu"
-        class="absolute bg-white/95 backdrop-blur w-full border-b border-graylv2 z-10 md:hidden shadow-lg"
+        class="absolute bg-background w-full max-w-[1190px] border-b border-graylv2 z-10 md:hidden"
       ></div>
-      </header>
+      <!-- // 모바일에서 메뉴 영역이 보이도록 하는 영역 -->
+    </header>
 
-    <main class="container p-4 md:p-8 w-full mx-auto max-w-[1190px] min-h-screen">
+    <main class="container p-8 pb-4 w-full mx-auto max-w-[1190px] md:pt-[60px]">
+      <!-- 블로그 포스트 리스트 영역 -->
       <div
         id="blog-posts"
-        class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 lg:gap-8 mb-20 mt-8 md:mt-10"
+        class="grid md:grid-cols-2 lg:grid-cols-3 gap-x-[25px] lg:gap-y-10 gap-y-4 mb-20"
       ></div>
+      <!-- // 블로그 포스트 리스트 영역-->
+
+      <!-- contents 영역 -->
       <div
         id="contents"
-        class="mt-6 mb-28 grid-cols-3 max-w-[900px] mx-auto prose prose-slate prose-img:rounded-xl prose-a:text-primary hover:prose-a:text-blue-700"
+        class="mt-6 mb-28 grid-cols-3 max-w-[990px] mx-auto"
       ></div>
-      <div id="pagination" class="flex justify-center gap-2 my-10"></div>
-    </main>
-    
-    <footer class="bg-white border-t border-graylv2 py-8 mt-auto">
-        <div class="container mx-auto px-4 text-center text-graylv3 text-sm">
-            <p>&copy; 2024 <span class="font-bold text-surface">WENIVLOG</span>. All rights reserved.</p>
-            <p class="mt-2">Powered by GitHub Pages & Tailwind CSS</p>
-        </div>
-    </footer>
+      <!-- // contents 영역-->
 
+      <!-- pagination -->
+      <div id="pagination"></div>
+    </main>
+
+    <!-- category 검색 영역 -->
     <section
-      class="category-aside hidden md:flex flex-col border border-graylv2 bg-white/90 backdrop-blur rounded-xl shadow-soft fixed top-24 right-8 overflow-y-auto w-fit h-fit transition-all hover:shadow-lg z-40"
+      class="category-aside hidden md:flex flex-col border border-graylv2 bg-white rounded-[10px] fixed top-24 right-8 overflow-y-auto w-fit h-fit"
     >
-      <header class="flex items-center p-1">
-        <h2 class="aside-tit sr-only text-sm font-semibold ml-5">Category</h2>
-        <button id="aside-button" class="p-2 text-primary hover:bg-activation rounded-lg transition-colors">
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
-            </svg>
+      <header class="flex items-center">
+        <h2 class="aside-tit sr-only text-sm font-semibold ml-5">content</h2>
+        <button id="aside-button">
           <span class="sr-only">카테고리 열기</span>
         </button>
       </header>
-      <aside class="px-2 pb-2"></aside>
+      <aside></aside>
     </section>
+    <!-- // category 검색 영역 -->
+
+    <!-- utils -->
     <script src="js/utils.js"></script>
+    <!-- convert ipynb to html -->
     <script src="style/convertIpynbToHtml.js"></script>
 
+    <!-- style -->
     <script src="style/globalStyle.js"></script>
     <script src="style/blogContentsStyle.js"></script>
 
+    <!-- mobile menu toggle -->
     <script src="js/mobileMenuToggle.js"></script>
 
+    <!-- lender -->
     <script src="config.js"></script>
     <script src="js/URLparsing.js"></script>
     <script src="js/initData.js"></script>
     <script src="js/render.js"></script>
 
+    <!-- registry -->
     <script src="js/registry.js"></script>
   </body>
 </html>
