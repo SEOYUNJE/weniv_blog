@@ -24,12 +24,11 @@ const postblockquoteStyle = `border-l-4 border-blue-500 bg-gray-50 pl-6 py-4 my-
 const postpreStyle = `relative bg-graylv1 p-4 rounded-[10px] mb-6 text-base font-medium overflow-auto whitespace-pre-wrap break-words text-justify max-w-full h-auto align-middle`;
 const postcodeStyle = `font-mono text-base bg-transparent`;
 
-const posttableStyle = `table-auto w-auto border-collapse mb-6 h-auto align-middle border-graylv2 text-left`;
-const posttheadStyle = `text-left`;
-const postthStyle = `overflow-auto bg-graylv1 border border-graylv2 px-4 py-2.5 font-medium text-sm capitalize whitespace-nowrap`;
+const posttableStyle = `w-full text-sm text-left text-gray-500 border-collapse rounded-lg overflow-hidden shadow-sm my-8`;
+const posttheadStyle = `text-xs text-gray-700 uppercase bg-gray-50`;
+const postthStyle = `px-6 py-4 font-bold tracking-wider border-b border-gray-200`;
 const posttbodyStyle = `text-left`;
-const posttdStyle = `border border-graylv2 px-4 py-2.5 text-sm text-gray-700 break-keep`;
-
+const posttdStyle = `px-6 py-4 border-b border-gray-100 bg-white hover:bg-gray-50 transition`;
 const posthrStyle = `my-4 border-gray-400 border-2 rounded-lg`;
 const postemStyle = `text-lg font-medium italic pr-0.5`;
 const poststrongStyle = `text-lg font-bold`;
