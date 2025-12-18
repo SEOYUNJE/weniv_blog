@@ -4,6 +4,6 @@ NVIDIA has recently published (20 June 2022) its papaer, **`GCViT: Global Contex
 
 <ins/>Global Context Vision Transformer 논문</ins> [Click](https://arxiv.org/pdf/2206.09959)
 
-## **Imagenet Top-1 Accuracy(%)**
+### **Imagenet Top-1 Accuracy(%)**
 
 ![alt text](image-1.png)
