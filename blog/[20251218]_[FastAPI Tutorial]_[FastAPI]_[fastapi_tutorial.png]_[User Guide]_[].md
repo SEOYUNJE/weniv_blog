@@ -11,9 +11,9 @@
 
 ## 2. Path Parameters
 
-- <ins/>URL Path이 일부로서 path에 정보를 담아서 Requests로 전달</ins>
-- <ins/>URL이 https://seoyunje.github.io/develop_blog/2라면 path는 develop_blog/2이면 path parameter는 2이다.</ins> 
-- <ins/>메세지는 Body 없이 전달</ins>
+- _URL Path이 일부로서 path에 정보를 담아서 Requests로 전달_
+- _URL이 https://seoyunje.github.io/develop_blog/2라면 path는 develop_blog/2이면 path parameter는 2이다._
+- _메세지는 Body 없이 전달_
 
 **`default usage`**
 
@@ -42,8 +42,8 @@ async def read_item(item_id: int) ## type hint
 
 ## 3. Query Parameters
 
-- <ins/>Query string이라고도 불리며 url에서 ?뒤에 key와 value 값을 가지는 형태로 requests로 전달, 개별 parameter는 &로 분리</ins>
-- <ins/>https://seoyunje.github.io/develop_blog/skip=1&limit=2라면 skip, limit가 query parameter이며 각 parameter 값은 1, 2이다</ins> 
+- _Query string이라고도 불리며 url에서 ?뒤에 key와 value 값을 가지는 형태로 requests로 전달, 개별 parameter는 &로 분리_
+- _https://seoyunje.github.io/develop_blog/skip=1&limit=2 라면 skip, limit가 query parameter이며 각 parameter 값은 1, 2이다_ 
 
 **`default usage`**
 
@@ -84,5 +84,5 @@ app = FastAPI()
 
 @app.get("/items/{item_id}")
 async def read_item(item_id: int, skip: int = 0, limit: int = 2):
-    return fake_items_db[skip: skip + limit]
+    return fake_items_db[skip: skip + limit + item_id]
 ```
