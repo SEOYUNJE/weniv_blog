@@ -75,3 +75,43 @@ Vistion Transformer(`ViT`)는 전역적인 문맥 정보를 효과적으로 학�
 3. _`global-window-attention`도 window-attention의 일종이지만 query로 window가 아닌 imgae를 사용해 `long range information`을 포착한다_
 
 4. _ViT랑 Swin Transformer과 달리, `cnn module`도 적용하여 `inductive bias`를 사용한다_
+
+## GCViT의 Argument
+
+| args | description |  gcvit_xxtiny | gcvit_xtiny | gcvit_tiny | gcvit_small | gcvit_base | 
+| ---- | ----------- |  ------------ | ----------- | ---------- | ----------- | ---------- |
+| `embed_dim` | feature size dimension | 64 | 64| 64 | 96 | 128 |
+| `depths` | number of layers in each stage | (2, 2, 6, 2) | (3, 4, 6, 5)| (3, 4, 19, 5) | (3, 4, 19, 5) | (3, 4, 19, 5) |
+| `window_size` | window size in each stage | (7,7,14,7) | (7,7,14,7) | (7,7,14,7) | (7,7,14,7) | (7,7,14,7) |
+| `mlp_ratio` | MLP ratio | 3 | 3 | 3 | 2 | 2 |
+| `num_heads` | number of heads in each stage | (2, 4, 8, 16) | (2, 4, 8, 16) | (2, 4, 8, 16)| (3, 6, 12, 24) | (4, 8, 16, 32) |
+| `qkv_bias` | bool argument for query key, value learnable bias| True | True | True | True | True |
+| `drop_rate` | dropout rate | 0 | 0 | 0 | 0 | 0 |
+| `attn_drop` | attention dropout rate| 0 | 0 | 0 | 0 | 0 |
+
+## GCViT 적용에 따른 Feature Map Shape 변환
+
+- **Img Size**: 224X224
+- **GCViT Model**: gcvit_tiny
+- **window size**: (7,7,14,7)
+- **embed_dim**: 64,
+- **detphs**: (3, 4, 19, 5)
+- **num_heads**: (2, 4, 8, 16)
+
+| Layer | Output Shape | Descriptions |
+| ----- | ------------ | ------------ |
+| Input Layer | (None 224, 224, 3) |  (Batch, Height, Width, Channel) | 
+| PatchEmbed | (None, 56, 56, 64) | (Batch, Height/Window, Width/Window, embed_dim |
+| Pos Drop | (None, 56, 56, 64) | None |
+| ![Level 0](https://img.shields.io/badge/Level_0-1E90FF?style=flat-square) | (None, 28, 28, 128) | (Batch, Height/Window * 2, Width/Window *2, embed_dim * 2) |
+| ![Level 1](https://img.shields.io/badge/Level_1-4DA3FF?style=flat-square) | (None, 14, 14, 256) | (Batch, Height/Window * 4, Width/Window *4, embed_dim * 4) |
+| ![Level 2](https://img.shields.io/badge/Level_2-9370DB?style=flat-square) | (None, 7, 7, 512) | (Batch, Height/Window * 8, Width/Window *8, embed_dim * 8)|
+| ![Level 3](https://img.shields.io/badge/Level_3-6A0DAD?style=flat-square) | (None, 7, 7, 512) | 마지막 level에선 downsample을 적용하지 않는다|
+| Norm | (None, 7, 7, 512) | Layer Normalization | 
+| Pool | (None, 512) | GlobalAveragePooling2D | 
+| Head | (None, 1) | num_classes = 1 |
+
+## GCViT 내 사용하는 CNN Module
+
+
+
