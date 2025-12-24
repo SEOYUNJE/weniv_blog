@@ -122,17 +122,17 @@ Vistion Transformer(`ViT`)는 전역적인 문맥 정보를 효과적으로 학�
 ```python
 class SEBlock(nn.Module):
 
-    def __init__(self, in_planes, ratio = 0.25):
+    def __init__(self, in_chs, rd_ratio = 0.25):
         super(SEBlock, self).__init__()
-        self.in_planes = in_planes
+        self.in_chs = in_chs
         self.ratio = ratio
 
         self.avg_pool = nn.AdaptiveAvgPool2d(1)
 
         self.fc = nn.Sequential(
-            nn.Conv2d(self.in_planes, self.in_planes * self.ratio, 1, bias=False),
+            nn.Conv2d(self.in_chs, self.in_chs * self.rd_ratio, 1, bias=False),
             nn.GELU(inplace=True),
-            nn.Conv2d(self.in_plaens * self.ratio, self.in_planes, 1, bias=False),
+            nn.Conv2d(self.in_chs * self.rd_ratio, self.in_chs, 1, bias=False),
         )
         self.sigmoid = nn.Sigmoid()
 
@@ -144,52 +144,82 @@ class SEBlock(nn.Module):
 
 2. Fused-MBConv
 
+GCVit에서 사용하는 MBConv 구조는 일반적인 Efficient 계열 모델에서 사용하는 MBConv 구조랑 차이점이 존재한다
+
+먼저, MBConv(Mobile Inverted Bottleneck)의 구조는 
+
+```bash
+    r = expand ratio, C`=C이면 residual 연결
+
+    1x1 Conv (Expand, C -> rC)
+    -> 3x3 Depthwise Conv (rC -> rC, groups=rC)
+    -> Squeeze Excitation
+    -> 1x1 Conv (Project, rC -> C')
+    -> Resiudal (C == C', stride=1)
+```
+
 ```python
-class Fused_MBConv(nn.Module):
-    def __init__(self, in_planes, out_planes, expand_ratio, stride = 1, se_ratio=0.25):
-        super(Fused_MBConv, self).__init__()
+class MBConvBlock(nn.Module):
+    def __init__(self,
+                 in_chs: int,
+                 out_chs: Optional[int] = None,
+                 expand_ratio: float = 1.0,
+                 act_layer: Type[nn.Module] = nn.GELU):
+        super().__init__()
 
-        hidden_dim = int(in_planes * expand_ratio)
-        self.use_residual = (stride == 1 and in_planes == out_planes)
+        out_chs = out_chs or in_chs
+        mid_chs = int(expand_ratio * in_chs)
 
-        self.dw_conv = nn.Conv2d(in_planes, hidden_dim, kernel_size=3, stride=stride, padding=1, bias=False)
-        self.act = nn.GELU()
-        self.se_block = SEBlock(hidden_dim, se_ratio)
-        self.proj_conv = nn.Conv2d(hidden_dim, out_planes, kernel_size=1, stride=1, padding=0, biase=False)
+        self.conv_dw = nn.Conv2d(in_chs, mid_chs, kernel_size=3, stride=1, padding=1, groups=in_chs, bias=False)
+        self.act = act_layer()
+        self.se = SEBlock(in_chs=mid_chs)
+        self.conv_pw = nn.Conv2d(mid_chs, out_chs, kernel_size=1, stride=1, padding=0, bias=False)
 
     def forward(self, x):
-
-        out = self.dw_conv(x)
+        shortcut = x
+        out = self.conv_dw(x)
         out = self.act(out)
-        out = self.se_block(out)
-        out = self.proj_conv(out)  
+        out = self.se(out)
+        out = self.conv_pw(out)
+        out = out + shortcut
 
-        if self.use_residual:
-            return x + out
-        
         return out
-
 ```
 
 3. DownSample
 
+
 ```python
-class DownSample(nn.Module):
-    def __init__(self, in_planes, out_planes, expand_ratio):
-        super(DownSample, self).__init__()
-        
-        self.fused_mbconv = Fused_MBConv(in_planes, out_planes, expand_ratio)
-        self.conv = nn.Conv2d(out_planes, out_planes, kerenl_size=3, stride=2, padding=1, bias=False)
-        self.norm = nn.LayerNorm(eps=1e-5)
+class Downsample2d(nn.Module):
+
+    """
+        LayerNorm: 학습 안정성 Up
+        MBconv: 정보 손실 최소화
+        Reduction: 학습 가능한 DownSampling
+    """
+
+    def __init__(self, 
+                in_chs: int, 
+                out_chs: Optional[int] = None, 
+                act_layer: Type[nn.Module] = nn.GELU,
+                norm_layer: Type[nn.Module] = nn.LayerNorm2d):
+
+        super().__init__()
+        out_chs = out_chs or in_chs
+
+        self.norm1 = norm_layer(out_chs) if norm_layer is not None else nn.Identity()
+        self.conv_block = MbConvBlock(out_chs, act_layer=act_layer)
+        self.reduction = nn.Conv2d(out_chs, out_chs, kernel_size=3, stride=2, padding=1, bias=False)
+
+        self.norm2 = norm_layer(out_chs) if norm_layer is not None else nn.Identity()
 
     def forward(self, x):
-        out = self.fused_mbconv(x)
-        out = self.conv(out)
-        out = self.norm(out)
+        out = self.norm1(x)
+        out = self.conv_block(out)
+        out = self.reduction(out)
+        out = self.norm2(out)
 
         return out
-
-
 ```
 ## Key Component in GCViT
 
@@ -204,7 +234,7 @@ class DownSample(nn.Module):
 
 - GCViT의 Patch Embedding: `Conv Stem` 적용 
     - Conv2d(k=3,s=2,p=1) -> Downsample2d
-    - (B, H, W, C) -> (B, H/2, W/2, C*2)
+    - (B, H, W, C) -> (B, H/4, W/4, D)
 
 
 아래의 코드는 timm의 gcvit 코드를 참고하여 작성하였다 
@@ -215,10 +245,12 @@ class Stem(nn.Module):
     """
        1. linear에 비해 훨씬 안정적으로 학습한다
        2. Inductive Bias를 가지고 있다.(인접한것끼리 연관되어 있음)
+       3. 즉 vit랑 swin transformer과는 달리 Overlapping Patches를 가진다
+       4. kernel과 stride를 동일하게 하면 non overlapping patch가 된다.
 
     """
 
-    def __init__(self, in_chs=3, out_chs=96, act_layer=nn.GELU, norm_layer=LayerNorm2d):
+    def __init__(self, in_chs=3, out_chs=embed_dim, act_layer=nn.GELU, norm_layer=LayerNorm2d):
         super().__init__()
 
         # (B, H, W) -> (B, H/2, W/2)
@@ -233,3 +265,19 @@ class Stem(nn.Module):
     
 
 ```
+
+2. Level
+
+해당 모듈에는 CNN, Transformer 모듈이 모두 포함되어 있다. 
+
+크게 Global Token Gen, Block, Downsample 3가지 part로 나뉘며
+작동 순서는 아래와 같다
+
+- `Feature Map` -> `Global Token` -> `Local/Global Window Attention` -> `DownSample`
+
+| Level Number | (B, H, W, 3) |
+| ------------ | ------------ |
+|   **Level 1**    | (B, H/4, W/4, C) |
+|   **Level 2**    | (B, H/8, W/8, 2C) |
+|   **Level 3**    | (B, H/16, W/16, 4C) |
+|   **Level 4**    | (B, H/32, W/32, 8C) |
