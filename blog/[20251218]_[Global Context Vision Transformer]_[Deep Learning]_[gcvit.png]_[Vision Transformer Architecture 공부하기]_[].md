@@ -10,7 +10,7 @@ NVIDIA has recently published (20 June 2022) its papaer, **`GCViT: Global Contex
 
 ## Introduction
 
-GC ViT leverages global context self-attention modules, joint with local self-attention, to effectively yet efficiently model both long and short range spatial interactions, without the need for expensive operations such as computing attention masks or shifting local windows.
+GCVit가 가지고 있는 특징 중 Vision Transformer랑 Swin Transformer와의 가장 큰 차이점은 Global Window Attention과 CNN 모듈을 사용한다는 점이다. 먼저 Vision Transformer은 level이 하나이므로 multi-level 정보가 부족하여 segmentation, object detection을 하는데 어려움이 있다. 그에 반해 Swin Transformer의 경우 dense prediction이 가능하지만 local window attention으로 인해 장거리 픽셀 간 의존성 학습이 부족하다. 이에 global query를 이용해 short-range & long-range 정보를 모두 가지도록 Nvida lab실에서 설계한 아키텍처이다. 
 
 ![image](/develop_blog/img/gcvit_architecture.JPG)
 
@@ -113,171 +113,307 @@ Vistion Transformer(`ViT`)는 전역적인 문맥 정보를 효과적으로 학�
 
 ## GCViT 내 사용하는 CNN Module
 
-1. SE(Squeeze-Excitation) Block
+### 1. SE(Squeeze-Excitation) Block
 
-채널 간 중요도를 학습하는 채널 어텐션 기법의 한 일종
-
-![img](/develop_blog/img/SE.JPG)
+SE는 채널 Attention 기법 중 하나로 GCViT에선 MBconv block을 사용하며 해당 conv block에서 SEBlock을 적용한다. 
 
 ```python
-class SEBlock(nn.Module):
+class SE(nn.Module):
+    """
+        Squeeze and Excitation Block
+    """
+    def __init__(
+        self, 
+        in_chs: int, 
+        rd_ratio: float = 0.25)
+        
+        """
+        Args:
+            in_chs: input features dimension.
+            rd_ratio: reduce ratio.
+        """
 
-    def __init__(self, in_chs, rd_ratio = 0.25):
-        super(SEBlock, self).__init__()
-        self.in_chs = in_chs
-        self.ratio = ratio
-
-        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        super().__init__()
+        self.pool = nn.AdaptiveAvgPool2d(1)
 
         self.fc = nn.Sequential(
-            nn.Conv2d(self.in_chs, self.in_chs * self.rd_ratio, 1, bias=False),
-            nn.GELU(inplace=True),
-            nn.Conv2d(self.in_chs * self.rd_ratio, self.in_chs, 1, bias=False),
+            nn.Linear(in_chs, int(in_chs * rd_ratio), bias=False),
+            nn.GELU(),
+            nn.Linear(int(in_chs * rd_ratio), in_chs, bias=False),
+            nn.Sigmoid()
         )
-        self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
-        out = self.avg_pool(x)
-        out = self.fc(out)
-        return x * self.sigmoid(out)
+        b, c, _, _ = x.size()
+        out = self.pool(x).view(b,c)
+        out = self.fc(out).view(b,c,1,1)
+
+        return x * out
+
 ```
 
-2. Fused-MBConv
+### 2. ReduceSize
 
-GCVit에서 사용하는 MBConv 구조는 일반적인 Efficient 계열 모델에서 사용하는 MBConv 구조랑 차이점이 존재한다
+해당 ReduceSize는 GCViT Level 마지막에 위치한 모듈로 keep_dim=False인 경우에만 채널을 2배 늘리고, 마지막 level의 경우에는 적용하지 않는다
 
-먼저, MBConv(Mobile Inverted Bottleneck)의 구조는 
+![img](/develop_blog/img/reducesize.JPG)
 
-```bash
-    r = expand ratio, C`=C이면 residual 연결
-
-    1x1 Conv (Expand, C -> rC)
-    -> 3x3 Depthwise Conv (rC -> rC, groups=rC)
-    -> Squeeze Excitation
-    -> 1x1 Conv (Project, rC -> C')
-    -> Resiudal (C == C', stride=1)
 ```
+    input shpae: (B, H, W, C) <- feature map
+    output shape: 
+        if keep_dim: (B, H//2, W//2, C) <- general use
+        else: (B, H//2, W//2, 2C) <- last gcvit level
+```
+
+- **MB Conv Block**: `Depthwise Conv` -> `GELU` -> `SE` -> `Proj Conv`
+
+- **Call**: `Layer Norm` -> `MBConv` -> `Reduction` -> `Layer Norm`
 
 ```python
-class MBConvBlock(nn.Module):
-    def __init__(self,
-                 in_chs: int,
-                 out_chs: Optional[int] = None,
-                 expand_ratio: float = 1.0,
-                 act_layer: Type[nn.Module] = nn.GELU):
+    class ReduceSize(nn.Module):
+        def __init__(
+            self, 
+            dim: int,
+            norm_layer: Type[nn.Module] = nn.LayerNorm,
+            keep_dim: bool = False,
+        ):
         super().__init__()
 
-        out_chs = out_chs or in_chs
-        mid_chs = int(expand_ratio * in_chs)
-
-        self.conv_dw = nn.Conv2d(in_chs, mid_chs, kernel_size=3, stride=1, padding=1, groups=in_chs, bias=False)
-        self.act = act_layer()
-        self.se = SEBlock(in_chs=mid_chs)
-        self.conv_pw = nn.Conv2d(mid_chs, out_chs, kernel_size=1, stride=1, padding=0, bias=False)
-
+        self.mb_conv = nn.Sequential(
+            nn.Conv(dim, dim, kernel_size=3, stride=1, padding=1, group=dim, bias=False),
+            nn.GELU(),
+            SE(dim),
+            nn.Conv2d(dim, dim, kernel_size=1, stride=1, padding=0, bias=False)
+        )
+        if keep_dim:
+            dim_out = dim
+        else:
+            dim_out = 2 * dim
+        
+        self.reduction = nn.Conv2d(dim, dim_out, kernel_size=3, stride=2,
+                                   padding=1, bias=False)
+        self.norm1 = norm_layer(dim)
+        self.norm2 = norm_layer(dim_out)
+        
     def forward(self, x):
-        shortcut = x
-        out = self.conv_dw(x)
-        out = self.act(out)
-        out = self.se(out)
-        out = self.conv_pw(out)
-        out = out + shortcut
-
-        return out
+        x = x.contiguous()
+        x = self.norm1(x)
+        x = x.permute(0,3,1,2) # (B,H,W,C) -> (B,C,H,W)
+        x = x + self.mb_conv(x) # Skip Connection
+        x = self.reduction(x)
+        x = x.permute(0,2,3,1) # (B,C,H,W) -> (B,H,W,C)
+        x = self.norm2(x)
+        return (x)
 ```
 
-3. DownSample
 
+## GCVit - PatchEmbed
 
-```python
-class Downsample2d(nn.Module):
-
-    """
-        LayerNorm: 학습 안정성 Up
-        MBconv: 정보 손실 최소화
-        Reduction: 학습 가능한 DownSampling
-    """
-
-    def __init__(self, 
-                in_chs: int, 
-                out_chs: Optional[int] = None, 
-                act_layer: Type[nn.Module] = nn.GELU,
-                norm_layer: Type[nn.Module] = nn.LayerNorm2d):
-
-        super().__init__()
-        out_chs = out_chs or in_chs
-
-        self.norm1 = norm_layer(out_chs) if norm_layer is not None else nn.Identity()
-        self.conv_block = MbConvBlock(out_chs, act_layer=act_layer)
-        self.reduction = nn.Conv2d(out_chs, out_chs, kernel_size=3, stride=2, padding=1, bias=False)
-
-        self.norm2 = norm_layer(out_chs) if norm_layer is not None else nn.Identity()
-
-    def forward(self, x):
-        out = self.norm1(x)
-        out = self.conv_block(out)
-        out = self.reduction(out)
-        out = self.norm2(out)
-
-        return out
-```
-## Key Component in GCViT
-
-1. Stem(PatchEmbed)
-
-**Note**: 일반적으로 `PatchEmbed`로 명칭하지만 GCViT 논문에선 이를 `Stem`이라고 명칭함
+해당 GCVit 아키텍처에선 Patchembedding을 Linear projection이 아닌 Conv Stem 방식으로 진행한다. Linear Projection의 경우 patch들이 서로 독립된 정보를 가지고 있는 반면 conv stem의 픽셀들의 경우 서로 인접한 경우 정보가 연관되어 있어 학습을 하는데 있어 훨씬 빠르고 안정적으로 가능하다
 
 - ViT의 Patch Embedding: `Linear projection` 적용
-    - p: patch_size, D: embed_dim
+    - p: patch_size, D: embed_dim, N: num_patches
     - rearrange -> nn.Linear(P²C → D)
-    - (B, H, W, C) -> (B, H*W/p*p, D) 
+    - (B, H, W, C) -> (B, N, D) 
 
 - GCViT의 Patch Embedding: `Conv Stem` 적용 
-    - Conv2d(k=3,s=2,p=1) -> Downsample2d
-    - (B, H, W, C) -> (B, H/4, W/4, D)
+    - input shape: (B, in_chs, H, W)
+    - output shape: (B, H//4, W//4, dim)
+    - `nn.Conv2d(in_chs, dim, k=3,s=2)` -> `ReduceSize(keep_dim=True)`
 
-
-아래의 코드는 timm의 gcvit 코드를 참고하여 작성하였다 
 
 ```python
-class Stem(nn.Module):
-
-    """
-       1. linear에 비해 훨씬 안정적으로 학습한다
-       2. Inductive Bias를 가지고 있다.(인접한것끼리 연관되어 있음)
-       3. 즉 vit랑 swin transformer과는 달리 Overlapping Patches를 가진다
-       4. kernel과 stride를 동일하게 하면 non overlapping patch가 된다.
-
-    """
-
-    def __init__(self, in_chs=3, out_chs=embed_dim, act_layer=nn.GELU, norm_layer=LayerNorm2d):
+class PatchEmbed(nn.Module):
+    def __init__(self, 
+                in_chs: int = 3, 
+                dim: int = 96):
         super().__init__()
-
-        # (B, H, W) -> (B, H/2, W/2)
-        self.conv1 = nn.Conv2d(in_chs, out_chs, kernel_size=3, stride=2, padding=1) # padding = (kernel_size - 1) // 2
-        
-        # (B, H/2, W/2, C) -> (B, H/4, W/4, 2C)
-        self.down = Downsample2d(out_chs, act_layer=act_layer, norm_layer=norm_layer)
-
-    def forward(self, x):
-        out = self.conv1(x)
-        out = self.down(x)
+        self.proj_conv = nn.Conv2d(in_chs, dim, kernel_size=3, stride=2, padding=1)
+        self.down_conv = ReduceSize(dim=dim, keep_dim=True)
     
+    def forward(self, x):
+        x = self.proj_conv(x)
+        x = x.permute(0,2,3,1) # (B,C,H,W) -> (B,H,W,C)
+        x = self.down_conv(x)
+        return x
 
 ```
 
-2. Level
+## GCVit - Window Partition, Window Reverse
 
-해당 모듈에는 CNN, Transformer 모듈이 모두 포함되어 있다. 
+### Window Partition
 
-크게 Global Token Gen, Block, Downsample 3가지 part로 나뉘며
-작동 순서는 아래와 같다
+Window Attention을 적용하기 위해선 주어진 Feature Map을 window size로 변환을 해줘야 한다
 
-- `Feature Map` -> `Global Token` -> `Local/Global Window Attention` -> `DownSample`
+```
+    intput shape: (B, H, W, C) <- Feature map
+    output shape: (B * num_windows, window_size, window_size, C)
+```
 
-| Level Number | (B, H, W, 3) |
-| ------------ | ------------ |
-|   **Level 1**    | (B, H/4, W/4, C) |
-|   **Level 2**    | (B, H/8, W/8, 2C) |
-|   **Level 3**    | (B, H/16, W/16, 4C) |
-|   **Level 4**    | (B, H/32, W/32, 8C) |
+```python
+def window_partition(x, window_size):
+    B, H, W, C = x.shape
+    x = x.view(B, H//window_size, window_size, W//window_size, window_size, C)
+
+    windows = x.permute(0,1,3,2,4,5).contiguous().view(-1, window_size, window_size, C)
+
+    return windows
+```
+
+### Window Reverse
+
+반대로 Local or Global Window Attention을 적용한 이후에는 ... ReduceSize 적용을 위해서 다시 (B,H,W,C) 형태로 돌려놔야 한다 
+
+```
+    input shape: (B*num_windows, window_size, window_size, C)
+    output shape: (B, H, W, C)
+```
+
+```python
+def window_reverse(windows, window_size, H, W):
+    """
+    Args:
+        windows: local window features (num_windows*B, window_size, window_size, C)
+        window_size: Window size
+        H: Height of image
+        W: Width of image
+
+    Returns:
+        x: (B, H, W, C)
+    """
+
+    C = windows.shape[-1]
+    x = windows.view(-1, H//window_size, W//window_size, window_size, window_size, C)
+    x = x.permute(0,1,3,2,4,5).contiguous().view(-1,H,W,C)
+    return x
+
+```
+
+## GCVit - how to generate global query
+
+Local Window Attention의 경우 query, key, value 모두 window를 사용하지만
+
+장거리 의존성 학습을 위해 GCViT에선 Swin Transformer의 `shifted local attention` 대신해서 `global window attention` 개념을 사용했다
+
+이에 Global Window Attention에선 query가 global query gen에서 생성한 feature map을 이용한다
+
+이때, global q는 각 GCViT Level에서 받은 Feature map을 가지고 window 크기로 resize하는 과정을 거치고 하나의 global query를 모든 local window에 query로 제공하며 되므로 효율적이다. 
+
+### 1. FeatExtract
+
+해당 모듈은 `MBconv`과 `Maxpool`로 이루어진 간단한 CNN 모듈이다 
+
+그리고 해당 FeatExtract을 반복해서 window_size 크기만큼 resize를 진행한다
+
+```
+    input shape: (B,D,H,W)
+    output shape: 
+        if keep_dim: (B,D,H,W)
+        else: (B,D,H//2,W//2)
+```
+
+```python
+    class FeatExtract(nn.Module):
+    
+    """
+        Resize: Feature map -> window for global attention
+        k번 Repeat(MBConv -> MaxPool 2X2)
+        k번: log2(feature map Height // window_size)
+    """
+    def __init__(self, dim, keep_dim=False):
+        super().__init__()
+        self.mb_conv = nn.Sequential(
+            nn.Conv2d(dim, dim, kernel_size=3, stride=1, padding=1,
+                      groups=dim, bias=False),
+            nn.GELU(),
+            SE(dim),
+            nn.Conv2d(dim, dim, kernel_size=1, stride=1, padding=0, bias=False)
+        )
+        if not keep_dim:
+            self.pool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        
+        self.keep_dim = keep_dim
+    
+    def forward(self, x):
+        x = x.contiguous()
+        x = x = self.conv(x) # skip connection
+        if not self.keep_dim:
+            x = self.pool(x)
+            
+        return x
+```
+
+### 2. GlobalQueryGen
+
+FeatExtract를 반복하여 해당 level의 window_size랑 동일하게 해당 level의 feature map을 resize를 진행한다. 그렇게 해서 나온 resized image가 global window attention에 적용하는 global query or q_global이다.
+
+이때 FeatExtract의 반복 횟수: log2(Feature map Height // window_size[0])
+
+```
+    input shape: (B, D, H, W)
+    output shape: (B,1,num_heads,window_size*window_size,dim_head)
+```
+
+```python
+class GlobalQueryGen(nn.Module):
+    
+    def __init__(self,
+                 dim: int,
+                 input_resolution: int | float,
+                 image_resolution: int | float,
+                 window_size: int,
+                 num_heads: int):
+        super().__init__()
+        
+        ## Level 0: (B, H//4, W//4, C)
+        if input_resolution == image_resolution//4:
+            self.to_q_global = nn.Sequential(
+                FeatExtract(dim, keep_dim=False),
+                FeatExtract(dim, keep_dim=False),
+                FeatExtract(dim, keep_dim=False),
+            )
+            
+        ## Level 1: (B, H//8, W//8, 2C)
+        elif input_resolution == image_resolution//8:
+            self.to_q_global = nn.Sequential(
+                FeatExtract(dim, keep_dim=False),
+                FeatExtract(dim, keep_dim=False),
+            )
+        ## Level 2: (B, H//16, W//16, 4C)
+        elif input_resolution == image_resolution//16:
+            if window_size == input_resolution:
+                self.to_g_global = nn.Sequential(
+                    FeatExtract(dim, keep_dim=True)
+                )
+            else:
+                self.to_q_global = nn.Sequential(
+                    FeatExtract(dim, keep_dim=True)
+                )
+        
+        ## Level 3: (B, H//32, W//32, 8C)
+        elif input_resolution == image_resolution//32:
+            self.to_q_global = nn.Sequential(
+                FeatExtract(dim, keep_dim=True)
+            )
+        
+        self.resolution = input_resolution
+        self.num_heads = num_heads 
+        self.N = window_size * window_size
+        self.dim_head = torch.div(dim, self.num_heads, rounding_mode='floor')            
+    
+    def forward(self, x):
+        x = self.to_q_qlobal(x) # (B,C,H,W) -> (B,C,window,window)
+        x = x.permute(0,2,3,1) # (B,C,window,window) -> (B,window,window,C)
+        x = x.contiguous().view(x.shape[0],1,self.N,self.num_heads,self.dim_head).permute(0,1,3,2,4)
+        return x 
+```
+
+## GCVit - Window Attention
+
+### Local Window Attention
+
+### Global Window Attention 
+
+### GCVit - Total Strucutre
+
+
