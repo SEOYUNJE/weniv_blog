@@ -689,7 +689,23 @@ GCVit Level에서 가장 중요한 건 GCVit Block이며 해당 module은 **GCVi
 
 위의 모든 Sub module을 하나씩 bottom up 방식으로 진행하면서 분석해보았다.
 
-이때, 중요한 점은 GCViT tiny, small, Base, Large 모두 Level 0~4까지 사용했다는 점.. 그리고 맨 마지막 level에선 Reduce Size를 적용하지 않았다는 점을 유의 하자.
+그럼 지금까지 살펴본 sub module의 input, output shape를 정리해보자
+
+|  sub module | Input | Output |
+|  ---------- | ----- | ------ |
+|   ReduceSize | (B,H,W,C) | (B,H//2,W//2,2C) |   
+|   PatchEmbed | (B,in_chs,H,W) | (B,H//4,W//4,D) | 
+|   FeatExtract |  (B,C,H,W) | (B,C,H,W) | 
+|  GlobalQueryGen | (B,C,H,W) | (B,1,num_heads,window_size**2,head_dim)
+|  Window Partition | (B,H,W,C) | (B*num_windows, window_size, C) |
+|  Window Reverse | (B*num_windows, window_size**2, C) | ( B, H, W, C) | 
+|  LocalWindowAttention |  (B*num_windows, window_size**2, D) | (B*num_windows, window_size**2, D) |
+|  GlobalWindowAttention | (B*num_windows, window_size**2, D) | (B*num_windows, window_size**2, D) |
+|  GCVit Block | (B,H,W,C) | (B,H,W,C) |
+|  GCVit Level | (B,H,W,C) | (B,H//2,W//2,2C)
+|  GCVit | (B, in_chs, H, W) | (B, num_classes) |
+
+그리고 중요한 점은 GCViT tiny, small, Base, Large 모두 Level 0~4까지 사용했다는 점.. 그리고 맨 마지막 level에선 Reduce Size를 적용하지 않았다는 점을 유의 하자.
 
 또한 Level3, Level 4부터는 window size랑 resized image랑 크기를 인위적으로 동일하게 만들어서 max pool을 적용하지 않았다.
 이는 window_size가 [7,7,7,7]이 아니라 [7,7,14,7]인 이유이다. 
@@ -702,4 +718,6 @@ GCVit Level에서 가장 중요한 건 GCVit Block이며 해당 module은 **GCVi
 | `Level 1` | (B, 28, 28, 64) |   7   | ![Feature > Window](https://img.shields.io/badge/Feature_>_Window-red?style=flat-square) |
 | `Level 2` | (B, 14, 14, 128) |   14   |  ![Feature = Window](https://img.shields.io/badge/Feature_=_Window-blue?style=flat-square) | 
 | `Level 3` | (B, 7, 7, 256) |  7   | ![Feature = Window](https://img.shields.io/badge/Feature_=_Window-blue?style=flat-square)  |
+
+
 
