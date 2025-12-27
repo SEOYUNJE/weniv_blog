@@ -412,7 +412,178 @@ class GlobalQueryGen(nn.Module):
 
 ### Local Window Attention
 
+Local Window Attention은 Vision Transformer의 Multi-Head Self-Attention과 구조적으로 거의 동일하다.
+
+다만 positional encoding 방식에서 차이가 있다. ViT는 입력 패치 토큰에 절대적 positional embedding을 더하는 방식을 사용하며, 이는 embedding dimension이 고정되어 있을 때 효과적으로 학습된다. 반면 GCViT는 stage(level)가 증가함에 따라 embedding dimension이 점진적으로 확장되므로, 동일한 방식의 절대 positional embedding을 적용하기 어렵다.
+이에 GCViT에서는 relative_position_bias를 사용하여, query–key 간 attention score를 계산한 뒤 softmax를 적용하기 이전 단계에서 bias를 추가함으로써 상대적인 위치 정보를 학습한다.
+
+
+```
+    input shape: (B*num_windows, window_size**2, dim)
+    output shape: (B*num_windows, window_size*2, dim)
+```
+
+- `q,k attn` -> `attn + relative_position_bias` -> `qk, v attn` -> `proj` -> `proj_drop`
+
+```python
+    class LocalWindowAttention(nn.Module):
+
+    def __init__(self,
+                 dim: int,
+                 num_heads: int,
+                 window_size: int,
+                 qkv_bias: bool = True,
+                 qk_scale: float | None = None,
+                 attn_drop: float = 0.,
+                 proj_drop: float = 0.,
+                 ):
+
+        super().__init__()
+        window_size = (window_size, window_size)
+        self.window_size = window_size
+        self.num_heads = num_heads
+        head_dim = torch.div(dim, num_heads, rounding_mode='floor')
+        self.scale = qk_scale or head_dim ** -0.5
+        
+        # Window 토큰 사이의 상대적 h 거리: -(h-1) ~ 0 ~ (h-1)
+        # Window 토큰 사이의 상대적 w 거리: -(w-1) ~ 0 ~ (w-1)
+        self.relative_position_bias_table = nn.Parameter(
+            torch.zeros((2 * window_size[0] - 1) * (2 * window_size[1] - 1), num_heads))
+        
+        coords_h = torch.arange(self.window_size[0]) # h의 token 위치 [0,1,2]
+        coords_w = torch.arange(self.window_size[1]) # w의 token 위치 [0,1,2]
+        # h 좌표: [[0,0,0],[1,1,1],[2,2,2]]
+        # w 좌표: [[0,1,2],[0,1,2],[0,1,2]]
+        coords = torch.stack(torch.meshgrid([coords_h, coords_w]))  # (2, w,w)
+        # h: [0,0,0,1,1,1,2,2,2] 
+        # w: [0,1,2,0,1,2,0,1,2]
+        coords_flatten = torch.flatten(coords, 1) # (2,w*w)
+        # window 토큰 사이 거리 구하기: (2, w*w, w*w)
+        relative_coords = coords_flatten[:, :, None] - coords_flatten[:, None, :]
+        relative_coords = relative_coords.permute(1, 2, 0).contiguous() # (w*w, w*w, 2)
+        relative_coords[:, :, 0] += self.window_size[0] - 1 # 음수 제거, 범위[0~2w-1]
+        relative_coords[:, :, 1] += self.window_size[1] - 1 # 음수 제거, 범위[0~2w-1]
+        relative_coords[:, :, 0] *= 2 * self.window_size[1] - 1 # h_idx = h_dix * width
+        relative_position_index = relative_coords.sum(-1) # idx = h_idx * width + w_idx, (w*w, w*w)
+        
+        self.register_buffer("relative_position_index", relative_position_index)
+        self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
+        self.attn_drop = nn.Dropout(attn_drop)
+        self.proj = nn.Linear(dim, dim)
+        self.proj_drop = nn.Dropout(proj_drop)
+
+        trunc_normal_(self.relative_position_bias_table, std=.02)
+        self.softmax = nn.Softmax(dim=-1)
+
+    def forward(self, x, q_global):
+        B, N, C = x.shape # (B*num_windows, window_size**2, dim)
+        head_dim = torch.div(C, self.num_heads, rounding_mode='floor')
+        # (B, N, 3, num_heads, head_dim) -> (3, B, num_heads, N, head_dim)
+        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, head_dim).permute(2, 0, 3, 1, 4)
+        q, k, v = qkv[0], qkv[1], qkv[2] # (B, num_heads, N, head_dim)
+        q = q * self.scale
+        attn = (q @ k.transpose(-2, -1)) # (B, num_heads, N, N)
+        
+        # ((2W-1)*(2W-1), num_heads) -> (w*w, w*w, num_heads)
+        relative_position_bias = self.relative_position_bias_table[self.relative_position_index.view(-1)].view(
+            self.window_size[0] * self.window_size[1], self.window_size[0] * self.window_size[1], -1)
+        # (w*w, w*w, num_hads) -> (num_heads, N, N)
+        relative_position_bias = relative_position_bias.permute(2, 0, 1).contiguous()
+        
+        attn = attn + relative_position_bias.unsqueeze(0)
+        attn = self.softmax(attn)
+        attn = self.attn_drop(attn)
+
+        # (B, num_heads, N, head_dim) -> (B, N, C)
+        x = (attn @ v).transpose(1, 2).reshape(B, N, C)
+        x = self.proj(x)
+        x = self.proj_drop(x)
+        return x
+```
+
 ### Global Window Attention 
+
+global window attention과 local window attention의 차이점은 단순하다
+
+query 값으로 window가 아니라 Global Query Gen에서 나온 q_global을 입력값으로 준다. 다만, q_global를 num_windows만큼 repeat해 각 local window에 적용하면 되고 하나의 global query를 모든 local window에 적용하다는 점에서 계산이 효율적이다. 
+
+또한 local의 경우 qkv를 위해 `nn.Linear(dim, dim*3, bias=qkv_biase)`를 했지만 global은 외부에서 query를 가져오므로 `nn.Linear(dim, dim*2, bias=qkv_bias)`로 k,v만 구한다
+
+- `q_global X (num_windows)` -> `q_global, k attn` -> `attn + relative_position_bias` -> `qk & attn` -> `proj` -> `proj_drop` 
+
+```
+    inp: (B*num_windows, window_size**2, dim)
+        q_query: (B,1,num_heads,window_size**2, head_dim) 
+               -> (B, num_windows, num_heads, window_size**2, head_dim)
+        out: (B*num_windows,window_size**2, dim)
+```
+
+```python
+class GlobalWindowAttention(nn.Module):
+
+    def __init__(self,
+                 dim: int,
+                 num_heads: int,
+                 window_size: int,
+                 qkv_bias: bool = True,
+                 qk_scale: float | None = None,
+                 attn_drop: float = 0.,
+                 proj_drop: float = 0.,
+                 ):
+
+        super().__init__()
+        window_size = (window_size, window_size)
+        self.window_size = window_size
+        self.num_heads = num_heads
+        head_dim = torch.div(dim, num_heads, rounding_mode='floor')
+        self.scale = qk_scale or head_dim ** -0.5
+        self.relative_position_bias_table = nn.Parameter(
+            torch.zeros((2 * window_size[0] - 1) * (2 * window_size[1] - 1), num_heads))
+        coords_h = torch.arange(self.window_size[0])
+        coords_w = torch.arange(self.window_size[1])
+        coords = torch.stack(torch.meshgrid([coords_h, coords_w]))
+        coords_flatten = torch.flatten(coords, 1)
+        relative_coords = coords_flatten[:, :, None] - coords_flatten[:, None, :]
+        relative_coords = relative_coords.permute(1, 2, 0).contiguous()
+        relative_coords[:, :, 0] += self.window_size[0] - 1
+        relative_coords[:, :, 1] += self.window_size[1] - 1
+        relative_coords[:, :, 0] *= 2 * self.window_size[1] - 1
+        relative_position_index = relative_coords.sum(-1)
+        self.register_buffer("relative_position_index", relative_position_index)
+        self.qkv = nn.Linear(dim, dim * 2, bias=qkv_bias)
+        self.attn_drop = nn.Dropout(attn_drop)
+        self.proj = nn.Linear(dim, dim)
+        self.proj_drop = nn.Dropout(proj_drop)
+        trunc_normal_(self.relative_position_bias_table, std=.02)
+        self.softmax = nn.Softmax(dim=-1)
+
+    def forward(self, x, q_global):
+        B_, N, C = x.shape # (B_*num_windows, window_size**2, dim)
+        B = q_global.shape[0] # B
+        head_dim = torch.div(C, self.num_heads, rounding_mode='floor')
+        B_dim = torch.div(B_, B, rounding_mode='floor') # num_windows
+        # (B_, N, 2, num_heads, head_dim) -> (2, B_, num_heads, N, head_dim)
+        kv = self.qkv(x).reshape(B_, N, 2, self.num_heads, head_dim).permute(2,0,3,1,4)        
+        k, v = kv[0], kv[1]
+        # (B, num_windows, num_heads, window_size**2, head_dim)
+        q_global = q_global.repeat(1, B_dim, 1, 1, 1) # Compute Coefficient
+        # (B, num_windows, num_heads, window_size**2, head_dim)
+        # (B * num_windows, num_heads, window_size**2, head_dim)
+        q = q_global.reshape(B_, self.num_heads, N, head_dim)
+        q = q * self.scale
+        attn = (q @ k.transpose(-2,-1)) # (B_, num_heads, N, N)
+        relative_position_bias = self.relative_position_bias_table[self.relative_position_index.view(-1)].view(
+            self.window_size[0] * self.window_size[1], self.window_size[0] * self.window_size[1], -1)
+        relative_position_bias = relative_position_bias.permute(2, 0, 1).contiguous()
+        
+        attn = attn + relative_position_bias.unsqueeze(0)
+        attn = self.softmax(attn)
+        attn = self.attn_drop(attn)
+        x = (attn @ v).transpose(1, 2).reshape(B_, N, C)
+        x = self.proj(x)
+        x = self.proj_drop(x)
+        return x
+```
 
 ### GCVit - Total Strucutre
 
